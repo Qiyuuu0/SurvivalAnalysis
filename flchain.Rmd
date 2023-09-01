@@ -1,0 +1,850 @@
+---
+title: "flchain"
+output: pdf_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## data
+
+```{r}
+library(survival)
+#library(devtools)
+#install_github("FJRubio67/HazReg")
+library(HazReg)
+library(spBayesSurv)
+data("flchain")
+# attach the data called 'flchain'
+attach(flchain)
+```
+
+
+```{r}
+## ---------------------------------------------------------------------------------------------------------
+# New data frame: logical status, time in years, survival times
+dfl <- data.frame(time = flchain$futime, status = flchain$death)
+dfl$time <- ifelse(dfl$time==0,0.5,dfl$time)
+dfl$status <- as.logical(flchain$death)
+dfl$time <- dfl$time/365.25
+
+# Required quantities
+lstatus <- as.logical(dfl$status)
+lsurvtimes <- dfl$time
+```
+
+```{r}
+# Survival time analysis
+summary(lsurvtimes)
+# Create a histogram for age
+hi<-hist(flchain$age, xlab = "Age", ylab = "Frequency",
+         xlim = c(50,105), ylim = c(0,2500),
+         main = "Age Distribution",
+         col = "lightblue",breaks = 10)
+text(x=hi$mids, y=hi$counts,labels=hi$counts,pos=3,cex=0.8)
+
+# Calculate the frequency of sex
+fsex<-table(flchain$sex)
+# Calculate the percentage
+per<-round(fsex/sum(fsex)*100)
+# Combine the names with percentage
+lab<-paste(names(fsex),"\n",per,"%",sep = "")
+# draw a pie gragh
+pie(fsex,main = 'Sex Distribution',
+    labels = lab,
+    col = c('pink','lightblue'),
+    cex.main=1.2)
+# Add a legend
+legend("topright", legend = names(fsex),
+       fill = c('pink','lightblue'),cex=1)
+
+```
+
+
+
+
+```{r}
+## ---------------------------------------------------------------------------------------------------------
+# Kaplan-Meier estimator for the survival times
+lkm <- survfit(Surv(lsurvtimes, lstatus) ~ 1)
+# Plot the Kaplan-Maier survival curve
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1,
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival", 
+     main = "Kaplan-Maier survival curve")
+```
+
+
+## Weibull distribution
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Weibull distribution
+#--------------------------------------------------------------------------------------------------
+
+# Initial value
+initlW <- c(0,0)
+
+# Optimisation step using method called 'nlminb'
+OPTlW <- WMLE(initlW, lsurvtimes, lstatus, hstr = "W", method = "nlminb", maxit = 10000)
+
+# MLE
+MLElW <- c(exp(OPTlW$OPT$par[1]), exp(OPTlW$OPT$par[2]))
+
+# Fitted Weibull hazard function
+fithlW <- Vectorize(function(t) hweibull( t, MLElW[1], MLElW[2] ) )
+
+# Fitted Weibull survival function
+# S(t)=exp^(-H(t)) 
+fitslW <- Vectorize(function(t) exp(-chweibull( t, MLElW[1], MLElW[2] ) ))
+
+# Calculate the AIC for Weibull distribution
+AIClW <- 2*OPTlW$OPT$objective + 2*length(OPTlW$OPT$par)
+
+# Calculate the BIC for Weibull distribution
+BIClW <- 2*OPTlW$OPT$objective + length(OPTlW$OPT$par)*log(length(lsurvtimes))
+```
+
+## Log-Normal distribution
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Log-Normal distribution
+#--------------------------------------------------------------------------------------------------
+
+# Initial value
+initlLN <- c(0,0)
+
+# Optimisation step using method called 'nlminb'
+OPTlLN <- LNMLE(initlLN, lsurvtimes, lstatus, hstr = "LN", method = "nlminb", maxit = 10000)
+
+# MLE
+MLElLN <- c(OPTlLN$OPT$par[1], exp(OPTlLN$OPT$par[2]))
+
+# Fitted Log-Normal hazard function
+fithlLN <- Vectorize(function(t) hlnorm( t, MLElLN[1], MLElLN[2] ) )
+
+# Fitted Log-Normal survival function
+# S(t)=exp^(-H(t))
+fitslLN <- Vectorize(function(t) exp(-chlnorm( t, MLElLN[1], MLElLN[2] ) ))
+
+# Calculate the AIC for Log-Normal distribution
+AIClLN <- 2*OPTlLN$OPT$objective + 2*length(OPTlLN$OPT$par)
+
+# Calculate the BIC for Log-Normal distribution
+BIClLN <- 2*OPTlLN$OPT$objective +length(OPTlLN$OPT$par)*log(length(lsurvtimes))
+```
+
+## Log-Logistic distribution
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Log-Logistic distribution
+#--------------------------------------------------------------------------------------------------
+
+# Initial value
+initlLL <- c(0,0)
+
+# Optimisation step using method called 'nlminb'
+OPTlLL <- LLMLE(initlLL, lsurvtimes, lstatus, hstr = "LL", method = "nlminb", maxit = 10000)
+
+# MLE
+MLElLL <- c(OPTlLL$OPT$par[1], exp(OPTlLL$OPT$par[2]))
+
+# Fitted Log-Logistic hazard function
+fithlLL <- Vectorize(function(t) hllogis( t, MLElLL[1], MLElLL[2] ) )
+
+# Fitted Log-Logistic survival function
+# S(t)=exp^(-H(t)) 
+fitslLL <- Vectorize(function(t) exp(-chllogis( t, MLElLL[1], MLElLL[2] ) ))
+
+# Calculate the AIC for Log-Logistic distribution
+AIClLL <- 2*OPTlLL$OPT$objective + 2*length(OPTlLL$OPT$par)
+
+# Calculate the BIC for Log-Logistic distribution
+BIClLL <- 2*OPTlLL$OPT$objective + length(OPTlLL$OPT$par)*log(length(lsurvtimes))
+```
+
+```{r}
+#########################################################################################
+# Kumaraswamy distribution
+# Parameters
+#########################################################################################
+# a > 0
+# b > 0
+# 0 < x < 1
+#########################################################################################
+
+#------------------------------------------------------------------
+# PDF
+# f(x;a,b) = a*b*x^(a-1)*(1-x^a)^(b-1)
+#------------------------------------------------------------------
+
+dkuma <- Vectorize(function(x,a,b,log = FALSE){
+  logden <-  log(a) + log(b) + (a-1)*log(x) + (b-1)*log(1-x^a)
+  val <- ifelse(log, logden, exp(logden)) 
+  return(val)
+})
+
+#------------------------------------------------------------------
+# CDF
+# F(q;a,b) = 1-(1-q^a)^b
+#------------------------------------------------------------------
+
+pkuma <- Vectorize(function(q,a,b,log.p = FALSE){
+  cdf <-  1 - (1-q^a)^b
+  val <- ifelse(log.p, log(cdf), cdf)
+  return(val)
+})
+```
+
+```{r}
+###############################################################
+# Generalised Weibull hazard and cumulative hazard
+###############################################################
+
+# t : positive argument
+# mu : mean parameter in the log scale
+# sigma : scale parameter in the log scale
+# a : shape parameter of the Kumaraswamy distribution
+# b : shape parameter of the Kumaraswamy distribution
+# log: log scale (TRUE or FALSE)
+
+# Generalised Weibull hazard function
+# h_hat(t)=(p(S(t))f(t))/P(S(t))*h(t)
+# p and P are the pdf and cdf of the Kumaraswamy distribution respectively
+# S(t) is the survival function of the Weibull distribution 
+# f(t) and h(t) are pdf and hazard function of the Weibull distribution
+khgwei <- function (t, mu, sigma, a, b, log = FALSE) 
+{
+ whaz <- hweibull(t, mu, sigma, log = TRUE)
+ wSt <- -chweibull(t, mu, sigma)
+ Stw <- exp( wSt ) 
+ wweight <- dkuma(Stw,a,b,log=TRUE) + wSt - 
+            pkuma(Stw,a,b,log.p=TRUE)
+ 
+ val <- wweight + whaz
+  
+  if (log) 
+    return(val)
+  else return(exp(val))
+}
+
+# S(t)=exp^(-H(t)) 
+# S(t): the survival function of the Weibull distribution
+# H(t): the cumulative hazard function of the Weibull distribution
+# S_hat(t)=P(S(t))
+# P: the cdf of the Kumaraswamy distribution
+kchgwei <- function (t, mu, sigma, a, b) 
+{
+  Stw <- exp(-chweibull(t, mu, sigma) )
+  val <- -pkuma(Stw,a,b,log.p=TRUE)
+    return(val)
+}
+
+```
+
+## .
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Generalised Weibull distribution
+# Using the Kumaraswamy distribution as P
+#--------------------------------------------------------------------------------------------------
+
+# Obtain the observed survival times that are not censored
+tobs <- lsurvtimes[lstatus]
+
+# Get the negative of the log likelihood function
+lwei_GWK <- function(par){
+
+    m0 <- exp(par[1])
+    s0 <- exp(par[2])
+    a0 <- exp(par[3])
+    b0 <- exp(par[4])
+    
+    lhaz0 <- khgwei(tobs, m0,s0,a0,b0, log = TRUE)
+    val <- -sum(lhaz0) + sum(kchgwei(lsurvtimes,m0,s0,a0,b0))
+    return(val)
+  
+}
+
+# Initial value
+# The value are close to the maximum likelihood estimator
+initlGWK <- c(OPTlW$OPT$par,0,0)
+
+# Optimisation step
+OPTlGWK <- nlminb(initlGWK, lwei_GWK, control = list(iter.max = 10000))
+
+# MLE
+MLElGWK <- c(exp(OPTlGWK$par[1:4]))
+
+# Fitted Generalised Weibull hazard function
+fithlGWK <- Vectorize(function(t) khgwei( t, MLElGWK[1], MLElGWK[2], MLElGWK[3], MLElGWK[4] ) )
+
+# Fitted Generalised Weibull survival function
+fitslGWK <- Vectorize(function(t) exp(-kchgwei( t, MLElGWK[1], MLElGWK[2], MLElGWK[3], MLElGWK[4] ) ))
+
+# Calculate the AIC for the generalised Weibull distribution with Kumaraswamy distribution
+AIClGWK <- 2*OPTlGWK$objective + 2*length(OPTlGWK$par)
+
+# Calculate the BIC for the generalised Weibull distribution with Kumaraswamy distribution
+BIClGWK <- 2*OPTlGWK$objective + length(OPTlGWK$par)*log(length(lsurvtimes))
+
+```
+
+
+```{r}
+#############################################################################
+# comparison
+#############################################################################
+
+# Model selection using AIC and BIC
+c(AIClW,AIClGWK)
+c(BIClW,BIClGWK)
+
+
+# Fitted survival functions
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1, 
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival")
+curve(fitslW, 0, 20, add = TRUE, lwd = 2, col = "red")
+curve(fitslGWK, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("bottomright", legend = c("KM","W","GWK"), col = c("black","red","blue"), lwd = c(2,2,2))
+
+# Fitted hazard functions
+curve(fithlW, 0, 20, lwd = 2, col = "red", ylim = c(0,0.1), ylab = "Hazard", xlab = "Time in years")
+curve(fithlGWK, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("topright", legend = c("W","GWK"), col = c("red","blue"), lwd = c(2,2))
+```
+
+```{r}
+###############################################################
+# Generalised Log-Normal hazard and cumulative hazard
+###############################################################
+
+# t : positive argument
+# mu : mean parameter in the log scale
+# sigma : scale parameter in the log scale
+# a : shape parameter of the Kumaraswamy distribution
+# b : shape parameter of the Kumaraswamy distribution
+# log: log scale (TRUE or FALSE)
+
+# Use the same method that define khgwei and kchgwei to define khglnormal and kchglnormal
+khglnormal <- function (t, mu, sigma, a, b, log = FALSE) 
+{
+ lnhaz <- hlnorm(t, mu, sigma, log = TRUE)
+ lnSt <- -chlnorm(t, mu, sigma)
+ nSt <- exp( lnSt ) 
+ lnweight <- dkuma(nSt,a,b,log=TRUE) + lnSt - 
+             pkuma(nSt,a,b,log.p=TRUE)
+ 
+ val <- lnweight + lnhaz
+  
+  if (log) 
+    return(val)
+  else return(exp(val))
+}
+
+kchglnormal<- function (t, mu, sigma, a, b) 
+{
+  Stn <- exp(-chlnorm(t, mu, sigma) )
+  val <- -pkuma(Stn,a,b,log.p=TRUE)
+    return(val)
+}
+```
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Generalised Log-Normal distribution
+# Using the Kumaraswamy distribution as P
+#--------------------------------------------------------------------------------------------------
+
+# Negative Log likelihood
+
+llog_likGLNK <- function(par){
+
+    m0 <- par[1]
+    s0 <- exp(par[2])
+    a0 <- exp(par[3])
+    b0 <- exp(par[4])
+    
+    lnhaz0 <- khglnormal(tobs, m0,s0,a0,b0, log = TRUE)
+    
+    
+    val <- -sum(lnhaz0) + sum(kchglnormal(lsurvtimes,m0,s0,a0,b0))
+    return(val)
+  
+}
+
+
+# Initial value
+initlGLNK <- c(OPTlLN$OPT$par,0,0)
+
+# Optimisation step
+OPTlGLNK <- nlminb(initlGLNK, llog_likGLNK, control = list(iter.max = 10000))
+
+# MLE
+MLElGLNK <- c(OPTlGLNK$par[1], exp(OPTlGLNK$par[2:4]))
+
+# Fitted Generalised Log-Normal hazard function
+fithlGLNK <- Vectorize(function(t) khglnormal( t, MLElGLNK[1], MLElGLNK[2], MLElGLNK[3], MLElGLNK[4] ) )
+
+# Fitted Generalised Log-Normal survival function
+fitslGLNK <- Vectorize(function(t) exp(-kchglnormal( t, MLElGLNK[1], MLElGLNK[2], MLElGLNK[3], MLElGLNK[4] ) ))
+
+# AIC for the generalised Log-Normal distribution with Kumaraswamy distribution
+AIClGLNK <- 2*OPTlGLNK$objective + 2*length(OPTlGLNK$par)
+
+# BIC for the generalised Log-Normal distribution with Kumaraswamy distribution
+BIClGLNK <- 2*OPTlGLNK$objective + length(OPTlGLNK$par)*log(length(lsurvtimes))
+
+```
+
+```{r}
+#############################################################################
+# comparison
+#############################################################################
+
+# Model selection using AIC and BIC
+c(AIClLN,AIClGLNK)
+c(BIClLN,BIClGLNK)
+
+# Fitted survival functions
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1, 
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival")
+curve(fitslLN, 0, 20, add = TRUE, lwd = 2, col = "red")
+curve(fitslGLNK, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("bottomright", legend = c("KM","LN","GLNK"), col = c("black","red","blue"), lwd = c(2,2,2))
+
+# Fitted hazard functions
+curve(fithlLN, 0, 20, lwd = 2, col = "red", ylim = c(0,0.1), ylab = "Hazard", xlab = "Time in years")
+curve(fithlGLNK, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("topright", legend = c("LN","GLNK"), col = c("red","blue"), lwd = c(2,2))
+```
+
+```{r}
+###############################################################
+# Generalised Log-Logistic hazard and cumulative hazard
+###############################################################
+
+# t : positive argument
+# mu : mean parameter in the log scale
+# sigma : scale parameter in the log scale
+# a : shape parameter of the Kumaraswamy distribution
+# b : shape parameter of the Kumaraswamy distribution
+# log: log scale (TRUE or FALSE)
+
+# Use the same method that define khgwei and kchgwei to define khgllogis and kchgllogis
+khgllogis <- function (t, mu, sigma, a, b, log = FALSE) 
+{
+ lhaz <- hllogis(t, mu, sigma, log = TRUE)
+ lSt <- -chllogis(t, mu, sigma)
+ St <- exp( lSt ) 
+ lweight <- dkuma(St,a,b,log=TRUE) + lSt - 
+            pkuma(St,a,b,log.p=TRUE)
+ 
+ val <- lweight + lhaz
+  
+  if (log) 
+    return(val)
+  else return(exp(val))
+}
+
+kchgllogis <- function (t, mu, sigma, a, b) 
+{
+  St <- exp(-chllogis(t, mu, sigma) )
+  val <- -pkuma(St,a,b,log.p=TRUE)
+    return(val)
+}
+
+```
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Generalised Log-Logistic distribution
+# Using the Kumaraswamy distribution as P
+#--------------------------------------------------------------------------------------------------
+
+# Negative Log likelihood
+
+llog_likGLLK <- function(par){
+
+    m0 <- par[1]
+    s0 <- exp(par[2])
+    a0 <- exp(par[3])
+    b0 <- exp(par[4])
+    
+    lhaz0 <- khgllogis(tobs, m0,s0,a0,b0, log = TRUE)
+    
+    
+    val <- -sum(lhaz0) + sum(kchgllogis(lsurvtimes,m0,s0,a0,b0))
+    return(val)
+  
+}
+
+
+# Initial value
+initlGLLK <- c(OPTlLL$OPT$par,-1,-1)
+
+# Optimisation step
+OPTlGLLK <- nlminb(initlGLLK, llog_likGLLK, control = list(iter.max = 10000))
+
+# MLE
+MLElGLLK <- c(OPTlGLLK$par[1], exp(OPTlGLLK$par[2:4]))
+
+# Fitted Generalised Log-Logistic hazard function
+fithlGLLK <- Vectorize(function(t) khgllogis( t, MLElGLLK[1], MLElGLLK[2], MLElGLLK[3], MLElGLLK[4] ) )
+
+# Fitted Generalised Log-Logistic survival function
+fitslGLLK <- Vectorize(function(t) exp(-kchgllogis( t, MLElGLLK[1], MLElGLLK[2], MLElGLLK[3], MLElGLLK[4] ) ))
+
+# AIC for the generalised Log-Logistic distribution with Kumaraswamy distribution
+AIClGLLK <- 2*OPTlGLLK$objective + 2*length(OPTlGLLK$par)
+
+# BIC for the generalised Log-Logistic distribution with Kumaraswamy distribution
+BIClGLLK <- 2*OPTlGLLK$objective + length(OPTlGLLK$par)*log(length(lsurvtimes))
+```
+
+```{r}
+# comparison
+#############################################################################
+
+# Model selection using AIC and BIC
+c(AIClLL,AIClGLLK)
+c(BIClLL,BIClGLLK)
+
+# Fitted survival functions
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1, 
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival")
+curve(fitslLL, 0, 20, add = TRUE, lwd = 2, col = "red")
+curve(fitslGLLK, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("bottomright", legend = c("KM","LL","GLLK"), col = c("black","red","blue"), lwd = c(2,2,2))
+
+# Fitted hazard functions
+curve(fithlLL, 0, 20, lwd = 2, col = "red", ylim = c(0,0.1), ylab = "Hazard", xlab = "Time in years")
+curve(fithlGLLK, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("topright", legend = c("LL","GLLK"), col = c("red","blue"), lwd = c(2,2))
+
+```
+
+```{r}
+###############################################################
+# Generalised Weibull hazard and cumulative hazard
+###############################################################
+
+# t : positive argument
+# mu : mean parameter in the log scale
+# sigma : scale parameter in the log scale
+# a : shape parameter of the beta distribution
+# b : shape parameter of the beta distribution
+# log: log scale (TRUE or FALSE)
+
+# Use the same method that define khgwei and kchgwei to define bhgwei and bchgwei
+bhgwei <- function (t, mu, sigma, a, b, log = FALSE) 
+{
+ whaz <- hweibull(t, mu, sigma, log = TRUE)
+ wSt <- -chweibull(t, mu, sigma)
+ Stw <- exp( wSt ) 
+ wweight <- dbeta(Stw,a,b,log=TRUE) + wSt - 
+            pbeta(Stw,a,b,log.p=TRUE)
+ 
+ val <- wweight + whaz
+  
+  if (log) 
+    return(val)
+  else return(exp(val))
+}
+
+bchgwei <- function (t, mu, sigma, a, b) 
+{
+  Stw <- exp(-chweibull(t, mu, sigma) )
+  val <- -pbeta(Stw,a,b,log.p=TRUE)
+    return(val)
+}
+
+```
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Generalised Weibull distribution
+# Using the Beta distribution as P
+#--------------------------------------------------------------------------------------------------
+
+# Negative Log likelihood
+
+lwei_GWB <- function(par){
+
+    m0 <- exp(par[1])
+    s0 <- exp(par[2])
+    a0 <- exp(par[3])
+    b0 <- exp(par[4])
+    
+    lhaz0 <- bhgwei(tobs, m0,s0,a0,b0, log = TRUE)
+    
+    
+    val <- -sum(lhaz0) + sum(bchgwei(lsurvtimes,m0,s0,a0,b0))
+    return(val)
+  
+}
+
+
+# Initial value
+initlGWB <- c(OPTlW$OPT$par,-1,-1)
+
+# Optimisation step
+OPTlGWB <- nlminb(initlGWB, lwei_GWB, control = list(iter.max = 10000))
+
+# MLE
+MLElGWB <- c(exp(OPTlGWB$par[1:4]))
+
+# Fitted Generalised Weibull hazard function
+fithlGWB <- Vectorize(function(t) bhgwei( t, MLElGWB[1], MLElGWB[2], MLElGWB[3], MLElGWB[4] ) )
+
+# Fitted Generalised Weibull survival function
+fitslGWB <- Vectorize(function(t) exp(-bchgwei( t, MLElGWB[1], MLElGWB[2], MLElGWB[3], MLElGWB[4] ) ))
+
+# AIC for the generalised Weibull distribution with beta distribution
+AIClGWB <- 2*OPTlGWB$objective + 2*length(OPTlGWB$par)
+
+# BIC for the generalised Weibull distribution with beta distribution
+BIClGWB <- 2*OPTlGWB$objective + length(OPTlGWB$par)*log(length(lsurvtimes))
+
+```
+
+```{r}
+#############################################################################
+# comparison
+#############################################################################
+
+# Model selection using AIC and BIC
+c(AIClW,AIClGWB)
+c(BIClW,BIClGWB)
+
+# Fitted survival functions
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1, 
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival")
+curve(fitslW, 0, 20, add = TRUE, lwd = 2, col = "red")
+curve(fitslGWB, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("bottomright", legend = c("KM","W","GWB"), col = c("black","red","blue"), lwd = c(2,2,2))
+
+# Fitted hazard functions
+curve(fithlW, 0, 20, lwd = 2, col = "red", ylim = c(0,0.1), ylab = "Hazard", xlab = "Time in years")
+curve(fithlGWB, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("topright", legend = c("W","GWB"), col = c("red","blue"), lwd = c(2,2))
+
+```
+
+```{r}
+###############################################################
+# Generalised Log-Normal hazard and cumulative hazard
+###############################################################
+
+# t : positive argument
+# mu : mean parameter in the log scale
+# sigma : scale parameter in the log scale
+# a : shape parameter of the beta distribution
+# b : shape parameter of the beta distribution
+# log: log scale (TRUE or FALSE)
+
+# Use the same method that define khgwei and kchgwei to define bhglnormal and bchglnormal
+bhglnormal <- function (t, mu, sigma, a, b, log = FALSE) 
+{
+ lnhaz <- hlnorm(t, mu, sigma, log = TRUE)
+ lnSt <- -chlnorm(t, mu, sigma)
+ nSt <- exp( lnSt ) 
+ lnweight <- dbeta(nSt,a,b,log=TRUE) + lnSt - 
+             pbeta(nSt,a,b,log.p=TRUE)
+ 
+ val <- lnweight + lnhaz
+  
+  if (log) 
+    return(val)
+  else return(exp(val))
+}
+
+bchglnormal<- function (t, mu, sigma, a, b) 
+{
+  Stn <- exp(-chlnorm(t, mu, sigma) )
+  val <- -pbeta(Stn,a,b,log.p=TRUE)
+    return(val)
+}
+```
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Generalised Log-Normal distribution
+# Using the beta distribution as P
+#--------------------------------------------------------------------------------------------------
+
+# Negative Log likelihood
+
+llog_likGLNB <- function(par){
+
+    m0 <- par[1]
+    s0 <- exp(par[2])
+    a0 <- exp(par[3])
+    b0 <- exp(par[4])
+    
+    lnhaz0 <- bhglnormal(tobs, m0,s0,a0,b0, log = TRUE)
+    
+    
+    val <- -sum(lnhaz0) + sum(bchglnormal(lsurvtimes,m0,s0,a0,b0))
+    return(val)
+  
+}
+
+
+# Initial value
+initlGLNB <- c(OPTlLN$OPT$par,0,0)
+
+# Optimisation step
+OPTlGLNB <- nlminb(initlGLNB, llog_likGLNB, control = list(iter.max = 10000))
+
+# MLE
+MLElGLNB <- c(OPTlGLNB$par[1], exp(OPTlGLNB$par[2:4]))
+
+# Fitted Generalised Log-Normal hazard function
+fithlGLNB <- Vectorize(function(t) bhglnormal( t, MLElGLNB[1], MLElGLNB[2], MLElGLNB[3], MLElGLNB[4] ) )
+
+# Fitted Generalised Log-Normal survival function
+fitslGLNB <- Vectorize(function(t) exp(-bchglnormal( t, MLElGLNB[1], MLElGLNB[2], MLElGLNB[3], MLElGLNB[4] ) ))
+
+# AIC for the generalised Log-Normal distribution with beta distribution
+AIClGLNB <- 2*OPTlGLNB$objective + 2*length(OPTlGLNB$par)
+
+# BIC for the generalised Log-Normal distribution with beta distribution
+BIClGLNB <- 2*OPTlGLNB$objective + length(OPTlGLNB$par)*log(length(lsurvtimes))
+
+```
+
+```{r}
+#############################################################################
+# comparison
+#############################################################################
+
+# Model selection using AIC and BIC
+c(AIClLN,AIClGLNB)
+c(BIClLN,BIClGLNB)
+
+# Fitted survival functions
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1, 
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival")
+curve(fitslLN, 0, 20, add = TRUE, lwd = 2, col = "red")
+curve(fitslGLNB, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("bottomright", legend = c("KM","LN","GLNB"), col = c("black","red","blue"), lwd = c(2,2,2))
+
+# Fitted hazard functions
+curve(fithlLN, 0, 20, lwd = 2, col = "red", ylim = c(0,0.1), ylab = "Hazard", xlab = "Time in years")
+curve(fithlGLNB, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("topright", legend = c("LN","GLNB"), col = c("red","blue"), lwd = c(2,2))
+```
+
+```{r}
+###############################################################
+# Generalised Log-Logistic hazard and cumulative hazard
+###############################################################
+
+# t : positive argument
+# mu : mean parameter in the log scale
+# sigma : scale parameter in the log scale
+# a : shape parameter of the beta distribution
+# b : shape parameter of the beta distribution
+# log: log scale (TRUE or FALSE)
+
+# Use the same method that define khgwei and kchgwei to define bhgllogis and bchgllogis
+bhgllogis <- function (t, mu, sigma, a, b, log = FALSE) 
+{
+ lhaz <- hllogis(t, mu, sigma, log = TRUE)
+ lSt <- -chllogis(t, mu, sigma)
+ St <- exp( lSt ) 
+ lweight <- dbeta(St,a,b,log=TRUE) + lSt - 
+            pbeta(St,a,b,log.p=TRUE)
+ 
+ val <- lweight + lhaz
+  
+  if (log) 
+    return(val)
+  else return(exp(val))
+}
+
+bchgllogis <- function (t, mu, sigma, a, b) 
+{
+  St <- exp(-chllogis(t, mu, sigma) )
+  val <- -pbeta(St,a,b,log.p=TRUE)
+    return(val)
+}
+```
+
+```{r}
+#--------------------------------------------------------------------------------------------------
+# Fitting a Generalised Log-Logistic distribution
+# Using the beta distribution as P
+#--------------------------------------------------------------------------------------------------
+
+tobs <- lsurvtimes[lstatus]
+
+# Negative Log likelihood
+
+llog_likGLLB <- function(par){
+
+    m0 <- par[1]
+    s0 <- exp(par[2])
+    a0 <- exp(par[3])
+    b0 <- exp(par[4])
+    
+    lhaz0 <- bhgllogis(tobs, m0,s0,a0,b0, log = TRUE)
+    
+    
+    val <- -sum(lhaz0) + sum(bchgllogis(lsurvtimes,m0,s0,a0,b0))
+    return(val)
+  
+}
+
+
+# Initial value
+initlGLLB <- c(OPTlLL$OPT$par,-1,-1)
+
+# Optimisation step
+OPTlGLLB <- nlminb(initlGLLB, llog_likGLLB, control = list(iter.max = 10000))
+
+# MLE
+MLElGLLB <- c(OPTlGLLB$par[1], exp(OPTlGLLB$par[2:4]))
+
+# Fitted Generalised Log-Logistic hazard function
+fithlGLLB <- Vectorize(function(t) bhgllogis( t, MLElGLLB[1], MLElGLLB[2], MLElGLLB[3], MLElGLLB[4] ) )
+
+# Fitted Generalised Log-Logistic survival function
+fitslGLLB <- Vectorize(function(t) exp(-bchgllogis( t, MLElGLLB[1], MLElGLLB[2], MLElGLLB[3], MLElGLLB[4] ) ))
+
+# AIC for the generalised Log-Normal distribution with beta distribution
+AIClGLLB <- 2*OPTlGLLB$objective + 2*length(OPTlGLLB$par)
+
+# BIC for the generalised Log-Normal distribution with beta distribution
+BIClGLLB <- 2*OPTlGLLB$objective + length(OPTlGLLB$par)*log(length(lsurvtimes))
+```
+
+```{r}
+# comparison
+#############################################################################
+
+# Model selection using AIC and BIC
+c(AIClLL,AIClGLLB)
+c(BIClLL,BIClGLLB)
+
+# Fitted survival functions
+plot(lkm$time, lkm$surv, type = "l", col = "black", lwd = 2, lty = 1, 
+     ylim = c(0,1), xlab = "Time in years", ylab = "Survival")
+curve(fitslLL, 0, 20, add = TRUE, lwd = 2, col = "red")
+curve(fitslGLLB, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("bottomright", legend = c("KM","LL","GLLB"), col = c("black","red","blue"), lwd = c(2,2,2))
+
+# Fitted hazard functions
+curve(fithlLL, 0, 20, lwd = 2, col = "red", ylim = c(0,0.1), ylab = "Hazard", xlab = "Time in years")
+curve(fithlGLLB, 0, 20, add = TRUE, lwd = 2, col = "blue")
+legend("topright", legend = c("LL","GLLB"), col = c("red","blue"), lwd = c(2,2))
+
+```
+
+
+
